@@ -35,14 +35,24 @@ func (c *Communicator) Start(ctx context.Context, cmd *packersdk.RemoteCmd) erro
 	}
 
 	localCmd := common.ShellCommand(command)
+	log.Printf("SPACE Executing: %s %#v", localCmd.Path, localCmd.Args)
+	var stdoutPipe, stderrPipe io.ReadCloser
+	if stdoutPipe, err = localCmd.StdoutPipe(); err != nil {
+		err = fmt.Errorf("cannot connect stdout: %w", err)
+		return nil
+	}
+	if stderrPipe, err = localCmd.StderrPipe(); err != nil {
+		err = fmt.Errorf("cannot connect stderr: %w", err)
+		return nil
+	}
 	localCmd.Stdin = cmd.Stdin
-	localCmd.Stdout = cmd.Stdout
-	localCmd.Stderr = cmd.Stderr
 	log.Printf("Executing: %s %#v", localCmd.Path, localCmd.Args)
 	if err := localCmd.Start(); err != nil {
 		return err
 	}
 
+	go copy(cmd.Stdout, stdoutPipe)
+	go copy(cmd.Stderr, stderrPipe)
 	go func() {
 		exitStatus := 0
 		if err := localCmd.Wait(); err != nil {
@@ -66,6 +76,9 @@ func (c *Communicator) Start(ctx context.Context, cmd *packersdk.RemoteCmd) erro
 	return nil
 }
 
+func copy(w io.Writer, r io.ReadCloser) {
+	_, _ = io.Copy(w, r)
+}
 func (c *Communicator) Upload(dst string, r io.Reader, fi *os.FileInfo) error {
 	dst = filepath.Join(c.Chroot, dst)
 	log.Printf("Uploading to chroot dir: %s", dst)
